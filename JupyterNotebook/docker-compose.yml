@@ -1,0 +1,19 @@
+services:
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: local-jupyter
+
+    ports:
+      - "8888:8888"
+
+    volumes:
+      - ./workspace:/home/jovyan/work
+
+    command:
+      - start-notebook.py
+      - --ServerApp.root_dir=/home/jovyan/work
+
+    restart: unless-stopped

@@ -1,0 +1,19 @@
+services:
+  qgis-jupyterlab:
+    image: glcr.b-data.ch/jupyterlab/qgis/base:ltr
+    container_name: qgis-jupyterlab
+    ports:
+      - "8888:8888"   # JupyterLab 접속 포트
+    volumes:
+      - ./jupyterlab-jovyan:/home/jovyan  # 로컬 폴더 ↔ 컨테이너 홈디렉토리
+    environment:
+      # 아래 UID/GID 설정은 Linux 사용자 환경에서 권장.
+      # Windows/Mac이라면 주석 처리해도 됩니다.
+      # NB_UID: 1000
+      # NB_GID: 1000
+      CHOWN_HOME: "yes"
+      CHOWN_HOME_OPTS: "-R"
+      JUPYTER_TOKEN: mytoken123  # JupyterLab 접속 토큰 설정
+    tty: true
+    stdin_open: true
+    restart: unless-stopped

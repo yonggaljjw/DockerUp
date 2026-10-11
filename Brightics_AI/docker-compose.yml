@@ -1,0 +1,13 @@
+services:
+  brightics:
+    image: brightics/studio:latest
+    container_name: brightics
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - ./brightics-data:/brightics-studio/userdata
+
+    privileged: true

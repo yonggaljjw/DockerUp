@@ -1,0 +1,25 @@
+services:
+  qgis-server:
+    image: qgis/qgis-server:ltr
+    container_name: qgis-server
+    ports:
+      - "8080:80"
+    volumes:
+      - ./data:/io/data:ro
+    environment:
+      # 내부 NGINX를 비활성화하려면 설정 (옵션)
+      # SKIP_NGINX: "true"
+      # QGIS Server 로그 레벨 조정 예시 (필요 시)
+      QGIS_SERVER_LOG_LEVEL: "2"
+    restart: unless-stopped
+
+# 선택 사항: 외부 NGINX 인스턴스를 직접 사용할 경우
+#  nginx:
+#    image: nginx:latest
+#    volumes:
+#      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+#      - ./data:/io/data:ro
+#    ports:
+#      - "8080:80"
+#    depends_on:
+#      - qgis-server

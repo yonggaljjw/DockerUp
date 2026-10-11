@@ -1,0 +1,210 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:3.3.2
+  environment: &airflow-common-env # Executor
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+    # Airflow 3 Auth Manager
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+    # Metadata DB
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:airflow@postgres:5432/airflow
+
+    # Security
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+
+    # Airflow 3 Execution API
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+
+    # DAG 설정
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+
+    # Scheduler health check
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+
+  user: "${AIRFLOW_UID:-50000}:0"
+
+services:
+  # ---------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    restart: unless-stopped
+
+  # ---------------------------------------------------------
+  # Airflow 초기화
+  # DB migration + Admin 계정 생성
+  # ---------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+
+    container_name: airflow-init
+
+    environment:
+      <<: *airflow-common-env
+
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+
+    command: version
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+  # ---------------------------------------------------------
+  # API Server
+  # Airflow 2.x의 webserver 역할
+  # ---------------------------------------------------------
+  airflow-apiserver:
+    <<: *airflow-common
+
+    container_name: airflow-apiserver
+
+    command: api-server
+
+    ports:
+      - "8080:8080"
+
+    healthcheck:
+      test:
+        ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+    restart: unless-stopped
+
+  # ---------------------------------------------------------
+  # Scheduler
+  # DAG 실행 시점 결정
+  # ---------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+
+    container_name: airflow-scheduler
+
+    command: scheduler
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  # ---------------------------------------------------------
+  # DAG Processor
+  # Airflow 3.x에서는 별도 프로세스
+  # ---------------------------------------------------------
+  airflow-dag-processor:
+    <<: *airflow-common
+
+    container_name: airflow-dag-processor
+
+    command: dag-processor
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  # ---------------------------------------------------------
+  # Triggerer
+  # Deferrable Operator / Sensor 처리
+  # ---------------------------------------------------------
+  airflow-triggerer:
+    <<: *airflow-common
+
+    container_name: airflow-triggerer
+
+    command: triggerer
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+volumes:
+  postgres-db-volume:
